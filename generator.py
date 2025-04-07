@@ -75,7 +75,7 @@ def generate_and_save_sentiment(folder, symbol, name):
     conn = connect_db()
     cur = conn.cursor()
 
-    # 🧽 Clean symbol for DB matching
+    # 🧽 Clean symbol for DB matching & saving
     symbol_clean = symbol.replace("/", "").strip()
 
     # ✅ Fetch latest price/news/sentiment data
@@ -107,23 +107,20 @@ def generate_and_save_sentiment(folder, symbol, name):
     result = response.choices[0].message.content.strip()
     print(f"✅ Sentiment generated for {symbol}")
 
-    # ✅ Delete existing record for today
-    cur.execute("""
-        DELETE FROM ai_sentiment_output
-        WHERE symbol = %s AND generated_at::date = CURRENT_DATE
-    """, (symbol,))
+    # ✅ Always delete any existing for this symbol (no date filter)
+    cur.execute("DELETE FROM ai_sentiment_output WHERE symbol = %s", (symbol_clean,))
     conn.commit()
 
-    # ✅ Insert the fresh new report
+    # ✅ Insert clean symbol without slash
     cur.execute("""
         INSERT INTO ai_sentiment_output (symbol, result, generated_at)
         VALUES (%s, %s, %s)
-    """, (symbol, result, datetime.datetime.now()))
+    """, (symbol_clean, result, datetime.datetime.now()))
     conn.commit()
 
     cur.close()
     conn.close()
-    print(f"✅ {symbol} saved to ai_sentiment_output.\n")
+    print(f"✅ {symbol_clean} saved to ai_sentiment_output.\n")
 
 
 # ---------------------- INSTRUMENT LIST ----------------------
