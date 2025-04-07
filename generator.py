@@ -102,18 +102,23 @@ def generate_and_save_sentiment(folder, symbol, name):
     conn = connect_db()
     cur = conn.cursor()
 
+    # ✅ Fetch latest price/news/sentiment data
     cur.execute(f"SELECT * FROM {folder} WHERE symbol = %s ORDER BY last_updated DESC LIMIT 1", (symbol,))
     data = cur.fetchone()
 
+    # ✅ Fetch macroeconomic indicators
     cur.execute("SELECT * FROM macro_data ORDER BY last_updated DESC LIMIT 6")
     macro_data = cur.fetchall()
 
+    # ❌ If no data, skip
     if not data or not macro_data:
         print(f"❌ Data missing for {symbol}.")
         return
 
+    # ✅ Generate Prompt
     prompt = generate_prompt_metals(symbol, name, data, macro_data) if folder == "metals_sentiment" else generate_prompt_others(symbol, name, data, macro_data)
 
+    # ✅ Generate Sentiment from OpenAI
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -124,22 +129,25 @@ def generate_and_save_sentiment(folder, symbol, name):
     result = response.choices[0].message.content.strip()
     print(f"✅ Sentiment generated for {symbol}")
 
-    # ✅ Delete today's existing record before inserting
+    # ✅ Delete existing record for today (important for replacement)
     cur.execute("""
         DELETE FROM ai_sentiment_output
-        WHERE symbol = %s AND DATE(generated_at) = CURRENT_DATE
+        WHERE symbol = %s AND generated_at::date = CURRENT_DATE
     """, (symbol,))
+    conn.commit()  # Flush the delete
 
-    # ✅ Now insert the fresh new report
+    # ✅ Insert the fresh new report
     cur.execute("""
         INSERT INTO ai_sentiment_output (symbol, result, generated_at)
         VALUES (%s, %s, %s)
     """, (symbol, result, datetime.datetime.now()))
-
     conn.commit()
+
     cur.close()
     conn.close()
     print(f"✅ {symbol} saved to ai_sentiment_output.\n")
+
+
 
 
 # ---------------------- INSTRUMENT LIST ----------------------
