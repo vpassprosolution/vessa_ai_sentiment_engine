@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+
 # ---------------------- DB CONNECTION ----------------------
 def connect_db():
     return psycopg2.connect(
@@ -18,7 +19,8 @@ def connect_db():
         port="30451"
     )
 
-# ---------------------- PROMPT BUILDER: METALS ----------------------
+
+# ---------------------- PROMPT BUILDER: METALS (3 ARTICLES) ----------------------
 def generate_prompt_metals(symbol, name, data, macro_data):
     _, price, sentiment, recommendation, last_updated, *articles = data
 
@@ -60,8 +62,9 @@ Tone: short, Bloomberg-style, hedge-fund smart, dramatic but concise.
 """
     return prompt
 
-# ---------------------- PROMPT BUILDER: OTHERS ----------------------
-def generate_prompt_others(symbol, name, data, macro_data):
+
+# ---------------------- PROMPT BUILDER: OTHERS (1 ARTICLE) ----------------------
+def generate_prompt_single_article(symbol, name, data, macro_data):
     _, price, sentiment, recommendation, last_updated, article_title, article_sentiment, article_summary = data
 
     macro_lines = [f"- {row[1]}: {row[2]}%" for row in macro_data]
@@ -97,11 +100,13 @@ Tone: short, Bloomberg-style, hedge-fund smart, dramatic but concise.
 """
     return prompt
 
+
+# ---------------------- GENERATE + SAVE FUNCTION ----------------------
 def generate_and_save_sentiment(folder, symbol, name):
     conn = connect_db()
     cur = conn.cursor()
 
-    # ✅ Fetch latest price/news/sentiment data
+    # ✅ Fetch latest data from specific table
     cur.execute(f"SELECT * FROM {folder} WHERE TRIM(symbol) = %s ORDER BY last_updated DESC LIMIT 1", (symbol.strip(),))
     data = cur.fetchone()
     print(f"DEBUG: Fetched data for {symbol} ➜ {data}")
@@ -111,15 +116,18 @@ def generate_and_save_sentiment(folder, symbol, name):
     macro_data = cur.fetchall()
     print(f"DEBUG: Macro count for {symbol} ➜ {len(macro_data)}")
 
-    # ❌ If no data, skip
+    # ❌ If no data found
     if not data or not macro_data:
         print(f"❌ Data missing for {symbol}.")
         return
 
-    # ✅ Generate Prompt
-    prompt = generate_prompt_metals(symbol, name, data, macro_data) if folder == "metals_sentiment" else generate_prompt_others(symbol, name, data, macro_data)
+    # ✅ Prompt builder logic
+    if folder == "metals_sentiment":
+        prompt = generate_prompt_metals(symbol, name, data, macro_data)
+    else:
+        prompt = generate_prompt_single_article(symbol, name, data, macro_data)
 
-    # ✅ Generate Sentiment from OpenAI
+    # ✅ Generate Sentiment using OpenAI
     response = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -130,14 +138,14 @@ def generate_and_save_sentiment(folder, symbol, name):
     result = response.choices[0].message.content.strip()
     print(f"✅ Sentiment generated for {symbol}")
 
-    # ✅ Delete existing record for today (important for replacement)
+    # ✅ Delete today’s record to replace
     cur.execute("""
         DELETE FROM ai_sentiment_output
         WHERE symbol = %s AND generated_at::date = CURRENT_DATE
     """, (symbol,))
     conn.commit()
 
-    # ✅ Insert the fresh new report
+    # ✅ Insert new record
     cur.execute("""
         INSERT INTO ai_sentiment_output (symbol, result, generated_at)
         VALUES (%s, %s, %s)
@@ -147,9 +155,6 @@ def generate_and_save_sentiment(folder, symbol, name):
     cur.close()
     conn.close()
     print(f"✅ {symbol} saved to ai_sentiment_output.\n")
-
-
-
 
 
 # ---------------------- INSTRUMENT LIST ----------------------
@@ -193,11 +198,12 @@ all_instruments = [
     ("index_sentiment", "XU100", "BIST 100")
 ]
 
+
 # ---------------------- RUN ALL ----------------------
 if __name__ == "__main__":
     for folder, symbol, name in all_instruments:
         try:
             generate_and_save_sentiment(folder, symbol, name)
         except Exception as e:
-            print(f"Error with {symbol}: {str(e)}")
-        time.sleep(10)  # 10 seconds delay to prevent API overload
+            print(f"❌ Error with {symbol}: {str(e)}")
+        time.sleep(10)
