@@ -97,18 +97,19 @@ Tone: short, Bloomberg-style, hedge-fund smart, dramatic but concise.
 """
     return prompt
 
-# ---------------------- GENERATE + SAVE FUNCTION ----------------------
 def generate_and_save_sentiment(folder, symbol, name):
     conn = connect_db()
     cur = conn.cursor()
 
     # ✅ Fetch latest price/news/sentiment data
-    cur.execute(f"SELECT * FROM {folder} WHERE symbol = %s ORDER BY last_updated DESC LIMIT 1", (symbol,))
+    cur.execute(f"SELECT * FROM {folder} WHERE TRIM(symbol) = %s ORDER BY last_updated DESC LIMIT 1", (symbol.strip(),))
     data = cur.fetchone()
+    print(f"DEBUG: Fetched data for {symbol} ➜ {data}")
 
     # ✅ Fetch macroeconomic indicators
     cur.execute("SELECT * FROM macro_data ORDER BY last_updated DESC LIMIT 6")
     macro_data = cur.fetchall()
+    print(f"DEBUG: Macro count for {symbol} ➜ {len(macro_data)}")
 
     # ❌ If no data, skip
     if not data or not macro_data:
@@ -134,7 +135,7 @@ def generate_and_save_sentiment(folder, symbol, name):
         DELETE FROM ai_sentiment_output
         WHERE symbol = %s AND generated_at::date = CURRENT_DATE
     """, (symbol,))
-    conn.commit()  # Flush the delete
+    conn.commit()
 
     # ✅ Insert the fresh new report
     cur.execute("""
@@ -146,6 +147,7 @@ def generate_and_save_sentiment(folder, symbol, name):
     cur.close()
     conn.close()
     print(f"✅ {symbol} saved to ai_sentiment_output.\n")
+
 
 
 
